@@ -9,23 +9,14 @@ const port = 3000;
 // Path to the JSON file for persistent storage
 const bucketsFilePath = path.join(__dirname, 'buckets.json');
 
-// Load buckets from file or use default if file doesn’t exist
+// Load buckets from file or initialize empty array if file doesn’t exist
 let buckets = [];
 try {
   if (fs.existsSync(bucketsFilePath)) {
     const fileData = fs.readFileSync(bucketsFilePath, 'utf8');
     buckets = JSON.parse(fileData);
   } else {
-    buckets = [
-      {
-        name: 'mycdn-bucket',
-        publicUrl: 'https://pub-d9ad434a36f24cb898d62897a0bc5abe.r2.dev',
-      },
-      {
-        name: 'ridowww',
-        publicUrl: 'https://pub-bc61fbac62354eb0ab060dcb2a1b7d4c.r2.dev',
-      },
-    ];
+    buckets = [];
     fs.writeFileSync(bucketsFilePath, JSON.stringify(buckets, null, 2), 'utf8');
   }
 } catch (err) {
@@ -161,8 +152,31 @@ const cssStyles = `
   }
 `;
 
-// Home page - list all buckets
-app.get('/', (req, res) => {
+app.get('/', async (req, res) => {
+  // Validate bucket existence in R2
+  const validBuckets = [];
+  for (const bucket of buckets) {
+    try {
+      const command = new ListObjectsV2Command({ Bucket: bucket.name });
+      await s3Client.send(command);
+      validBuckets.push(bucket);
+    } catch (err) {
+      console.error(`Bucket ${bucket.name} no longer exists:`, err);
+      // Skip buckets that don't exist (e.g., deleted in R2)
+    }
+  }
+
+  // Update buckets array and file if any were removed
+  if (validBuckets.length !== buckets.length) {
+    buckets = validBuckets;
+    try {
+      fs.writeFileSync(bucketsFilePath, JSON.stringify(buckets, null, 2), 'utf8');
+      console.log('Updated buckets.json with valid buckets');
+    } catch (err) {
+      console.error('Error saving updated buckets to file:', err);
+    }
+  }
+
   const bucketListHtml = buckets.map(bucket => `
     <li>
       <a href="/bucket/${encodeURIComponent(bucket.name)}">${bucket.name}</a>
@@ -183,6 +197,7 @@ app.get('/', (req, res) => {
         <h2>Available Buckets</h2>
         <ul>
           ${bucketListHtml}
+         ${bucketListHtml}
         </ul>
         <form action="/add-bucket" method="POST">
           <h3>Add New Bucket</h3>
@@ -198,10 +213,8 @@ app.get('/', (req, res) => {
   `);
 });
 
-// API to update bucket data
 app.use(express.urlencoded({ extended: true })); // Middleware to parse URL-encoded data
 
-// Route to handle adding a new bucket
 app.post('/add-bucket', (req, res) => {
   const { name, publicUrl } = req.body;
 
@@ -255,7 +268,6 @@ app.post('/add-bucket', (req, res) => {
     `);
   }
 
-  // Return success message
   res.send(`
     <!DOCTYPE html>
     <html lang="en">
@@ -270,12 +282,11 @@ app.post('/add-bucket', (req, res) => {
         <h3>Bucket added successfully!</h3>
         <p><a href="/">Go back to the home page</a></p>
       </div>
-      </body>
-      </html>
-    `);
+    </body>
+    </html>
+  `);
 });
 
-// Show files inside a specific bucket
 app.get('/bucket/:bucketName', async (req, res) => {
   const bucketName = req.params.bucketName;
   const bucketConfig = buckets.find(b => b.name === bucketName);
@@ -363,7 +374,6 @@ app.get('/bucket/:bucketName', async (req, res) => {
   `);
 });
 
-// Forced download route
 app.get('/download/:bucketName/:key', async (req, res) => {
   const bucketName = req.params.bucketName;
   const fileKey = decodeURIComponent(req.params.key);
@@ -404,7 +414,6 @@ app.get('/download/:bucketName/:key', async (req, res) => {
   }
 });
 
-// Start server
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
 });
