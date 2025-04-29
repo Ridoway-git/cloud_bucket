@@ -197,7 +197,6 @@ app.get('/', async (req, res) => {
         <h2>Available Buckets</h2>
         <ul>
           ${bucketListHtml}
-         ${bucketListHtml}
         </ul>
         <form action="/add-bucket" method="POST">
           <h3>Add New Bucket</h3>
